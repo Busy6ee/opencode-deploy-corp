@@ -65,8 +65,11 @@ if [ -z "${PROVIDER_HOST}" ]; then
 fi
 
 echo ""
-read -rp "모델 ID (예: qwen2.5-coder:32b): " MODEL_ID
-read -rp "모델 표시 이름 (예: Qwen 2.5 Coder 32B): " MODEL_NAME
+read -rp "모델 ID [glm-4.7]: " MODEL_ID
+MODEL_ID="${MODEL_ID:-glm-4.7}"
+
+read -rp "모델 표시 이름 [GLM 4.7]: " MODEL_NAME
+MODEL_NAME="${MODEL_NAME:-GLM 4.7}"
 
 echo ""
 echo "context - output = 입력 가용 토큰. 자동 compaction이 이 기준으로 발동됨"
