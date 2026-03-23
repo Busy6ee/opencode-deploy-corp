@@ -54,6 +54,9 @@ fi
 echo "--- 프로바이더 설정 ---"
 echo ""
 
+read -rp "프로바이더 ID (예: ollama, vllm): " PROVIDER_ID
+PROVIDER_ID="${PROVIDER_ID:-ollama}"
+
 read -rp "프로바이더 서버주소:포트 (예: 192.168.1.100:11434): " PROVIDER_ADDR
 
 if [[ "${PROVIDER_ADDR}" == *:* ]]; then
@@ -88,7 +91,7 @@ read -rp "config.json \$schema URL (사내 GitHub raw URL): " SCHEMA_URL
 echo ""
 echo "--- 입력 확인 ---"
 echo "\$schema: ${SCHEMA_URL}"
-echo "프로바이더: http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1"
+echo "프로바이더: ${PROVIDER_ID} (http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1)"
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
 echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT} (입력 가용: $((CONTEXT_LIMIT - OUTPUT_LIMIT)))"
 echo "Node.js: v${NODE_VERSION} (${NODE_ARCH})"
@@ -197,13 +200,19 @@ sudo tee "${JSONC_PATH}" > /dev/null << JSONEOF
   "\$schema": "${SCHEMA_URL}",
   "autoupdate": false,
   "share": "disabled",
+  "tools": {
+    "webfetch": false,
+    "websearch": false,
+    "fetch": false
+  },
   "permission": {
     "webfetch": "deny",
     "websearch": "deny",
     "fetch": "deny"
   },
+  "enabled_providers": ["${PROVIDER_ID}"],
   "provider": {
-    "ollama": {
+    "${PROVIDER_ID}": {
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1"
