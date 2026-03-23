@@ -7,7 +7,7 @@ set -euo pipefail
 # ── 상수 ──────────────────────────────────────────────
 AIDM_ROOT="/opt/aidm"
 CONFIG_DIR="${AIDM_ROOT}/config"
-SKILL_DIR="${CONFIG_DIR}/skill"
+SKILL_DIR="${CONFIG_DIR}/skills"
 NODE_DIR="${AIDM_ROOT}/node"
 AIDM_OWNER="$(whoami)"
 AIDM_GROUP="aidm"
@@ -107,7 +107,7 @@ echo ""
 # ── 2. [1/6] 디렉토리 생성 + Node.js 설치 ────────────
 echo "[1/6] Node.js 설치..."
 
-sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skill,src,node}
+sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skills,src,node}
 
 if [ -x "${NODE_DIR}/bin/node" ]; then
     INSTALLED_NODE_VER="$("${NODE_DIR}/bin/node" --version 2>/dev/null || echo "")"
@@ -211,6 +211,7 @@ sudo tee "${JSONC_PATH}" > /dev/null << JSONEOF
     "fetch": "deny"
   },
   "enabled_providers": ["${PROVIDER_ID}"],
+  "model": "${PROVIDER_ID}/${MODEL_ID}",
   "provider": {
     "${PROVIDER_ID}": {
       "npm": "@ai-sdk/openai-compatible",
@@ -284,6 +285,14 @@ else
     case ",\${no_proxy}," in
         *",${PROVIDER_HOST},"*) ;;
         *) export no_proxy="\${no_proxy},${PROVIDER_HOST}" ;;
+    esac
+fi
+if [ -z "\${NO_PROXY:-}" ]; then
+    export NO_PROXY="${PROVIDER_HOST}"
+else
+    case ",\${NO_PROXY}," in
+        *",${PROVIDER_HOST},"*) ;;
+        *) export NO_PROXY="\${NO_PROXY},${PROVIDER_HOST}" ;;
     esac
 fi
 NOPROXYEOF
