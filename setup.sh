@@ -8,8 +8,10 @@ set -euo pipefail
 AIDM_ROOT="/opt/aidm"
 CONFIG_DIR="${AIDM_ROOT}/config"
 SKILL_DIR="${CONFIG_DIR}/skill"
+NODE_DIR="${AIDM_ROOT}/node"
 AIDM_OWNER="$(whoami)"
 AIDM_GROUP="aidm"
+NODE_VERSION="22.16.0"
 
 # ── 0. 사전 검증 ─────────────────────────────────────
 echo "=== OpenCode 온프레미스 셋업 ==="
@@ -21,11 +23,24 @@ if ! sudo -v 2>/dev/null; then
     exit 1
 fi
 
-# npm 확인
-if ! command -v npm &>/dev/null; then
-    echo "[오류] npm이 설치되어 있지 않습니다. Node.js/npm을 먼저 설치하세요."
-    exit 1
-fi
+# tar, curl 확인 (Node.js 바이너리 설치에 필요)
+for cmd in tar curl; do
+    if ! command -v "${cmd}" &>/dev/null; then
+        echo "[오류] ${cmd}이 설치되어 있지 않습니다."
+        exit 1
+    fi
+done
+
+# 아키텍처 감지
+ARCH="$(uname -m)"
+case "${ARCH}" in
+    x86_64)  NODE_ARCH="x64" ;;
+    aarch64) NODE_ARCH="arm64" ;;
+    *)
+        echo "[오류] 지원하지 않는 아키텍처: ${ARCH}"
+        exit 1
+        ;;
+esac
 
 # 레포 위치 감지
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -60,25 +75,23 @@ read -rp "모델 ID (예: qwen2.5-coder:32b): " MODEL_ID
 read -rp "모델 표시 이름 (예: Qwen 2.5 Coder 32B): " MODEL_NAME
 
 echo ""
-read -rp "컨텍스트 제한 [32768]: " CONTEXT_LIMIT
-CONTEXT_LIMIT="${CONTEXT_LIMIT:-32768}"
+echo "context - output = 입력 가용 토큰. 자동 compaction이 이 기준으로 발동됨"
+read -rp "컨텍스트 (vLLM max_model_len) [131072]: " CONTEXT_LIMIT
+CONTEXT_LIMIT="${CONTEXT_LIMIT:-131072}"
 
-read -rp "출력 제한 [8192]: " OUTPUT_LIMIT
-OUTPUT_LIMIT="${OUTPUT_LIMIT:-8192}"
+read -rp "출력 제한 [32000]: " OUTPUT_LIMIT
+OUTPUT_LIMIT="${OUTPUT_LIMIT:-32000}"
 
 echo ""
 read -rp "config.json \$schema URL (사내 GitHub raw URL): " SCHEMA_URL
-
-echo ""
-read -rp "Claude Code 시스템 비활성화 (y/N): " DISABLE_CLAUDE
-DISABLE_CLAUDE="${DISABLE_CLAUDE:-N}"
 
 echo ""
 echo "--- 입력 확인 ---"
 echo "\$schema: ${SCHEMA_URL}"
 echo "프로바이더: http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1"
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
-echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT}"
+echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT} (입력 가용: $((CONTEXT_LIMIT - OUTPUT_LIMIT)))"
+echo "Node.js: v${NODE_VERSION} (${NODE_ARCH})"
 echo ""
 read -rp "계속 진행하시겠습니까? (Y/n): " CONFIRM
 if [[ "${CONFIRM}" =~ ^[nN]$ ]]; then
@@ -88,20 +101,48 @@ fi
 
 echo ""
 
-# ── 2. [1/5] 디렉토리 생성 + OpenCode 설치 ───────────
-echo "[1/5] OpenCode 설치..."
+# ── 2. [1/6] 디렉토리 생성 + Node.js 설치 ────────────
+echo "[1/6] Node.js 설치..."
 
-sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skill,src}
+sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skill,src,node}
+
+if [ -x "${NODE_DIR}/bin/node" ]; then
+    INSTALLED_NODE_VER="$("${NODE_DIR}/bin/node" --version 2>/dev/null || echo "")"
+    if [ "${INSTALLED_NODE_VER}" = "v${NODE_VERSION}" ]; then
+        echo "  Node.js v${NODE_VERSION} 이미 설치됨. 건너뜀."
+    else
+        echo "  기존 버전(${INSTALLED_NODE_VER}) 발견. v${NODE_VERSION}으로 업데이트..."
+        NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
+        curl -fSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}"
+        sudo tar -xJf "/tmp/${NODE_TARBALL}" -C "${NODE_DIR}" --strip-components=1
+        rm -f "/tmp/${NODE_TARBALL}"
+        echo "  업데이트 완료: $("${NODE_DIR}/bin/node" --version)"
+    fi
+else
+    NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
+    echo "  다운로드: ${NODE_TARBALL}"
+    curl -fSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}" -o "/tmp/${NODE_TARBALL}"
+    sudo tar -xJf "/tmp/${NODE_TARBALL}" -C "${NODE_DIR}" --strip-components=1
+    rm -f "/tmp/${NODE_TARBALL}"
+    echo "  설치 완료: $("${NODE_DIR}/bin/node" --version)"
+fi
+
+# 이후 단계에서 로컬 node/npm 사용
+export PATH="${NODE_DIR}/bin:${PATH}"
+echo "  node: $(node --version), npm: $(npm --version)"
+
+# ── 3. [2/6] OpenCode 설치 ───────────────────────────
+echo "[2/6] OpenCode 설치..."
 
 if [ -x "${AIDM_ROOT}/bin/opencode" ]; then
     echo "  이미 설치됨. 건너뜀."
 else
-    sudo npm install -g opencode-ai --prefix "${AIDM_ROOT}"
+    sudo "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
     echo "  설치 완료."
 fi
 
-# ── 3. [2/5] 레포 클론 ──────────────────────────────
-echo "[2/5] 레포 배치..."
+# ── 4. [3/6] 레포 클론 ──────────────────────────────
+echo "[3/6] 레포 배치..."
 
 REPO_DEST="${AIDM_ROOT}/src/opencode-deploy-corp"
 
@@ -141,8 +182,8 @@ elif [ -L "${REPO_DEST}" ]; then
     REPO_SOURCE="$(readlink -f "${REPO_DEST}")"
 fi
 
-# ── 4. [3/5] opencode.jsonc 생성 ────────────────────
-echo "[3/5] 설정 파일 생성..."
+# ── 5. [4/6] opencode.jsonc 생성 ────────────────────
+echo "[4/6] 설정 파일 생성..."
 
 JSONC_PATH="${CONFIG_DIR}/opencode.jsonc"
 
@@ -183,8 +224,8 @@ JSONEOF
 
 echo "  생성 완료: ${JSONC_PATH}"
 
-# ── 5. [4/5] 스킬 심볼릭 링크 ───────────────────────
-echo "[4/5] 스킬 심볼릭 링크..."
+# ── 6. [5/6] 스킬 심볼릭 링크 ───────────────────────
+echo "[5/6] 스킬 심볼릭 링크..."
 
 if [ -d "${REPO_SOURCE}/skills" ]; then
     for skill_dir in "${REPO_SOURCE}/skills/"*/; do
@@ -202,8 +243,8 @@ else
     echo "  skills/ 디렉토리 없음. 건너뜀."
 fi
 
-# ── 6. [5/5] opencode.sh 생성 ────────────────────────
-echo "[5/5] 환경 설정 스크립트 생성..."
+# ── 7. [6/6] opencode.sh 생성 ────────────────────────
+echo "[6/6] 환경 설정 스크립트 생성..."
 
 OPENCODE_SH="${AIDM_ROOT}/opencode.sh"
 
@@ -212,10 +253,10 @@ sudo tee "${OPENCODE_SH}" > /dev/null << 'PROFILEEOF'
 # /opt/aidm/opencode.sh -- OpenCode 온프레미스 환경 설정
 # aidm 그룹 사용자만 source 가능
 
-export PATH="/opt/aidm/bin:$PATH"
+export PATH="/opt/aidm/node/bin:/opt/aidm/bin:$PATH"
 export OPENCODE_CONFIG_DIR="/opt/aidm/config"
 
-# 아웃바운드 차단 (7종)
+# 아웃바운드 차단 (6종)
 export OPENCODE_DISABLE_MODELS_FETCH=true
 export OPENCODE_DISABLE_AUTOUPDATE=true
 export OPENCODE_DISABLE_LSP_DOWNLOAD=true
@@ -223,11 +264,6 @@ export OPENCODE_DISABLE_EXTERNAL_SKILLS=true
 export OPENCODE_DISABLE_SHARE=true
 export OPENCODE_DISABLE_DEFAULT_PLUGINS=true
 PROFILEEOF
-
-# OPENCODE_DISABLE_CLAUDE_CODE 조건부 추가
-if [[ "${DISABLE_CLAUDE}" =~ ^[yY]$ ]]; then
-    echo 'export OPENCODE_DISABLE_CLAUDE_CODE=true' | sudo tee -a "${OPENCODE_SH}" > /dev/null
-fi
 
 # no_proxy 블록 추가 (provider 호스트를 리터럴로 삽입)
 sudo tee -a "${OPENCODE_SH}" > /dev/null << NOPROXYEOF
@@ -246,7 +282,7 @@ NOPROXYEOF
 sudo chmod +x "${OPENCODE_SH}"
 echo "  생성 완료: ${OPENCODE_SH}"
 
-# ── 7. 소유권 및 권한 설정 ───────────────────────────
+# ── 8. 소유권 및 권한 설정 ───────────────────────────
 echo ""
 echo "소유권/권한 설정..."
 
@@ -255,9 +291,10 @@ sudo chmod -R 2750 "${AIDM_ROOT}"
 
 echo "  ${AIDM_ROOT} -> ${AIDM_OWNER}:${AIDM_GROUP} (2750)"
 
-# ── 8. 완료 요약 ────────────────────────────────────
+# ── 9. 완료 요약 ────────────────────────────────────
 echo ""
 echo "===== 설치 완료 ====="
+echo "Node.js: $("${NODE_DIR}/bin/node" --version) (${NODE_DIR})"
 echo "프로바이더: http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1"
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
 echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT}"
