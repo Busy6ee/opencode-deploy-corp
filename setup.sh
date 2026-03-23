@@ -7,7 +7,6 @@ set -euo pipefail
 # ── 상수 ──────────────────────────────────────────────
 AIDM_ROOT="/opt/aidm"
 CONFIG_DIR="${AIDM_ROOT}/config"
-SKILL_DIR="${CONFIG_DIR}/skills"
 NODE_DIR="${AIDM_ROOT}/node"
 AIDM_OWNER="$(whoami)"
 AIDM_GROUP="aidm"
@@ -41,14 +40,6 @@ case "${ARCH}" in
         exit 1
         ;;
 esac
-
-# 레포 위치 감지
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "${SCRIPT_DIR}/AGENTS.md" ]; then
-    REPO_SOURCE="${SCRIPT_DIR}"
-else
-    REPO_SOURCE=""
-fi
 
 # ── 1. 대화형 입력 ───────────────────────────────────
 echo "--- 프로바이더 설정 ---"
@@ -104,10 +95,10 @@ fi
 
 echo ""
 
-# ── 2. [1/6] 디렉토리 생성 + Node.js 설치 ────────────
-echo "[1/6] Node.js 설치..."
+# ── 2. [1/4] 디렉토리 생성 + Node.js 설치 ────────────
+echo "[1/4] Node.js 설치..."
 
-sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skills,src,node}
+sudo mkdir -p "${AIDM_ROOT}"/{bin,lib,config/skills,node}
 
 if [ -x "${NODE_DIR}/bin/node" ]; then
     INSTALLED_NODE_VER="$("${NODE_DIR}/bin/node" --version 2>/dev/null || echo "")"
@@ -134,8 +125,8 @@ fi
 export PATH="${NODE_DIR}/bin:${PATH}"
 echo "  node: $(node --version), npm: $(npm --version)"
 
-# ── 3. [2/6] OpenCode 설치 ───────────────────────────
-echo "[2/6] OpenCode 설치..."
+# ── 3. [2/4] OpenCode 설치 ───────────────────────────
+echo "[2/4] OpenCode 설치..."
 
 if [ -x "${AIDM_ROOT}/bin/opencode" ]; then
     echo "  이미 설치됨. 건너뜀."
@@ -144,49 +135,8 @@ else
     echo "  설치 완료."
 fi
 
-# ── 4. [3/6] 레포 클론 ──────────────────────────────
-echo "[3/6] 레포 배치..."
-
-REPO_DEST="${AIDM_ROOT}/src/opencode-deploy-corp"
-
-if [ -n "${REPO_SOURCE}" ]; then
-    # 스크립트가 레포 안에서 실행됨
-    if [ "${REPO_SOURCE}" != "${REPO_DEST}" ]; then
-        if [ ! -e "${REPO_DEST}" ]; then
-            sudo ln -s "${REPO_SOURCE}" "${REPO_DEST}"
-            echo "  심볼릭 링크 생성: ${REPO_SOURCE} -> ${REPO_DEST}"
-        else
-            echo "  이미 존재. 건너뜀."
-        fi
-    else
-        echo "  이미 대상 경로에 위치. 건너뜀."
-    fi
-else
-    # 레포 외부에서 실행 -- clone 필요
-    if [ -d "${REPO_DEST}/.git" ]; then
-        echo "  이미 존재. git pull 실행..."
-        cd "${REPO_DEST}" && sudo git pull
-    else
-        REPO_URL=""
-        read -rp "  레포 Git URL: " REPO_URL
-        if [ -z "${REPO_URL}" ]; then
-            echo "  [경고] URL 미입력. 레포 클론 건너뜀."
-        else
-            sudo git clone "${REPO_URL}" "${REPO_DEST}"
-            echo "  클론 완료."
-        fi
-    fi
-fi
-
-# REPO_SOURCE 재설정 (이후 스킬 링크에 사용)
-if [ -d "${REPO_DEST}" ]; then
-    REPO_SOURCE="${REPO_DEST}"
-elif [ -L "${REPO_DEST}" ]; then
-    REPO_SOURCE="$(readlink -f "${REPO_DEST}")"
-fi
-
-# ── 5. [4/6] opencode.jsonc 생성 ────────────────────
-echo "[4/6] 설정 파일 생성..."
+# ── 4. [3/4] opencode.jsonc 생성 ────────────────────
+echo "[3/4] 설정 파일 생성..."
 
 JSONC_PATH="${CONFIG_DIR}/opencode.jsonc"
 
@@ -209,6 +159,9 @@ sudo tee "${JSONC_PATH}" > /dev/null << JSONEOF
     "webfetch": "deny",
     "websearch": "deny",
     "fetch": "deny"
+  },
+  "skills": {
+    "paths": ["${CONFIG_DIR}/skills"]
   },
   "enabled_providers": ["${PROVIDER_ID}"],
   "model": "${PROVIDER_ID}/${MODEL_ID}",
@@ -234,27 +187,8 @@ JSONEOF
 
 echo "  생성 완료: ${JSONC_PATH}"
 
-# ── 6. [5/6] 스킬 심볼릭 링크 ───────────────────────
-echo "[5/6] 스킬 심볼릭 링크..."
-
-if [ -d "${REPO_SOURCE}/skills" ]; then
-    for skill_dir in "${REPO_SOURCE}/skills/"*/; do
-        [ -d "${skill_dir}" ] || continue
-        skill_name="$(basename "${skill_dir}")"
-        target="${SKILL_DIR}/${skill_name}"
-        if [ ! -e "${target}" ]; then
-            sudo ln -s "${skill_dir}" "${target}"
-            echo "  링크 생성: ${skill_name}"
-        else
-            echo "  이미 존재: ${skill_name}"
-        fi
-    done
-else
-    echo "  skills/ 디렉토리 없음. 건너뜀."
-fi
-
-# ── 7. [6/6] opencode.sh 생성 ────────────────────────
-echo "[6/6] 환경 설정 스크립트 생성..."
+# ── 6. [4/4] opencode.sh 생성 ────────────────────────
+echo "[4/4] 환경 설정 스크립트 생성..."
 
 OPENCODE_SH="${AIDM_ROOT}/opencode.sh"
 
