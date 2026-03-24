@@ -134,7 +134,7 @@ echo "[2/4] OpenCode 설치..."
 if [ -x "${AIDM_ROOT}/bin/opencode" ]; then
     echo "  이미 설치됨. 건너뜀."
 else
-    sudo "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
+    sudo env PATH="${NODE_DIR}/bin:${PATH}" "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
     echo "  설치 완료."
 fi
 
