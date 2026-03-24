@@ -11,6 +11,8 @@ NODE_DIR="${AIDM_ROOT}/node"
 AIDM_OWNER="$(whoami)"
 AIDM_GROUP="aidm"
 NODE_VERSION="22.16.0"
+# RHEL 시스템 CA 번들 (update-ca-trust 후 사내 인증서 포함됨)
+SYSTEM_CA_BUNDLE="${SYSTEM_CA_BUNDLE:-/etc/pki/tls/certs/ca-bundle.crt}"
 
 # ── 0. 사전 검증 ─────────────────────────────────────
 echo "=== OpenCode 온프레미스 셋업 ==="
@@ -89,6 +91,7 @@ echo "프로바이더: ${PROVIDER_ID} (http://${PROVIDER_HOST}:${PROVIDER_PORT}/
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
 echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT} (입력 가용: $((CONTEXT_LIMIT - OUTPUT_LIMIT)))"
 echo "Node.js: v${NODE_VERSION} (${NODE_ARCH})"
+echo "CA 번들: ${SYSTEM_CA_BUNDLE} ($([ -f "${SYSTEM_CA_BUNDLE}" ] && echo '존재' || echo '없음'))"
 echo ""
 read -rp "계속 진행하시겠습니까? (Y/n): " CONFIRM
 if [[ "${CONFIRM}" =~ ^[nN]$ ]]; then
@@ -134,7 +137,15 @@ echo "[2/4] OpenCode 설치..."
 if [ -x "${AIDM_ROOT}/bin/opencode" ]; then
     echo "  이미 설치됨. 건너뜀."
 else
-    sudo env PATH="${NODE_DIR}/bin:${PATH}" "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
+    if [ -f "${SYSTEM_CA_BUNDLE}" ]; then
+        echo "  시스템 CA 번들 사용: ${SYSTEM_CA_BUNDLE}"
+        sudo env PATH="${NODE_DIR}/bin:${PATH}" NODE_EXTRA_CA_CERTS="${SYSTEM_CA_BUNDLE}" \
+            "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
+    else
+        echo "  [경고] CA 번들 없음(${SYSTEM_CA_BUNDLE}), strict-ssl=false 사용"
+        sudo env PATH="${NODE_DIR}/bin:${PATH}" \
+            "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}" --strict-ssl=false
+    fi
     echo "  설치 완료."
 fi
 
@@ -233,6 +244,15 @@ else
     esac
 fi
 NOPROXYEOF
+
+# 시스템 CA 번들 추가 (SSL 검사 프록시 환경)
+if [ -f "${SYSTEM_CA_BUNDLE}" ]; then
+    sudo tee -a "${OPENCODE_SH}" > /dev/null << CAEOF
+
+# 시스템 CA 번들 (SSL 검사 프록시 환경)
+export NODE_EXTRA_CA_CERTS="${SYSTEM_CA_BUNDLE}"
+CAEOF
+fi
 
 sudo chmod +x "${OPENCODE_SH}"
 echo "  생성 완료: ${OPENCODE_SH}"
