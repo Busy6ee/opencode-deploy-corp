@@ -81,6 +81,9 @@ CONTEXT_LIMIT="${CONTEXT_LIMIT:-131072}"
 read -rp "출력 제한 [32000]: " OUTPUT_LIMIT
 OUTPUT_LIMIT="${OUTPUT_LIMIT:-32000}"
 
+read -rp "OpenCode 버전 [latest]: " OPENCODE_VERSION
+OPENCODE_VERSION="${OPENCODE_VERSION:-latest}"
+
 echo ""
 read -rp "config.json \$schema URL (사내 GitHub raw URL): " SCHEMA_URL
 
@@ -90,6 +93,7 @@ echo "\$schema: ${SCHEMA_URL}"
 echo "프로바이더: ${PROVIDER_ID} (http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1)"
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
 echo "컨텍스트: ${CONTEXT_LIMIT}, 출력: ${OUTPUT_LIMIT} (입력 가용: $((CONTEXT_LIMIT - OUTPUT_LIMIT)))"
+echo "OpenCode: ${OPENCODE_VERSION}"
 echo "Node.js: v${NODE_VERSION} (${NODE_ARCH})"
 echo "CA 번들: ${SYSTEM_CA_BUNDLE} ($([ -f "${SYSTEM_CA_BUNDLE}" ] && echo '존재' || echo '없음'))"
 echo ""
@@ -134,17 +138,23 @@ echo "  node: $(node --version), npm: $(npm --version)"
 # ── 3. [2/4] OpenCode 설치 ───────────────────────────
 echo "[2/4] OpenCode 설치..."
 
+if [ "${OPENCODE_VERSION}" = "latest" ]; then
+    NPM_PKG="opencode-ai"
+else
+    NPM_PKG="opencode-ai@${OPENCODE_VERSION}"
+fi
+
 if [ -x "${AIDM_ROOT}/bin/opencode" ]; then
     echo "  이미 설치됨. 건너뜀."
 else
     if [ -f "${SYSTEM_CA_BUNDLE}" ]; then
         echo "  시스템 CA 번들 사용: ${SYSTEM_CA_BUNDLE}"
         sudo env PATH="${NODE_DIR}/bin:${PATH}" NODE_EXTRA_CA_CERTS="${SYSTEM_CA_BUNDLE}" \
-            "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}"
+            "${NODE_DIR}/bin/npm" install -g "${NPM_PKG}" --prefix "${AIDM_ROOT}"
     else
         echo "  [경고] CA 번들 없음(${SYSTEM_CA_BUNDLE}), strict-ssl=false 사용"
         sudo env PATH="${NODE_DIR}/bin:${PATH}" \
-            "${NODE_DIR}/bin/npm" install -g opencode-ai --prefix "${AIDM_ROOT}" --strict-ssl=false
+            "${NODE_DIR}/bin/npm" install -g "${NPM_PKG}" --prefix "${AIDM_ROOT}" --strict-ssl=false
     fi
     echo "  설치 완료."
 fi
