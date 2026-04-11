@@ -5,9 +5,6 @@
 set -euo pipefail
 
 # ── 상수 ──────────────────────────────────────────────
-AIDM_ROOT="/opt/aidm"
-CONFIG_DIR="${AIDM_ROOT}/config"
-NODE_DIR="${AIDM_ROOT}/node"
 AIDM_OWNER="$(whoami)"
 AIDM_GROUP="aidm"
 NODE_VERSION="22.16.0"
@@ -16,6 +13,15 @@ SYSTEM_CA_BUNDLE="${SYSTEM_CA_BUNDLE:-/etc/pki/tls/certs/ca-bundle.crt}"
 
 # ── 0. 사전 검증 ─────────────────────────────────────
 echo "=== OpenCode 온프레미스 셋업 ==="
+echo ""
+
+read -rp "설치 경로 [/opt/aidm]: " AIDM_ROOT
+AIDM_ROOT="${AIDM_ROOT:-/opt/aidm}"
+# 후행 슬래시 제거
+AIDM_ROOT="${AIDM_ROOT%/}"
+CONFIG_DIR="${AIDM_ROOT}/config"
+NODE_DIR="${AIDM_ROOT}/node"
+
 echo ""
 
 # sudo 권한 확인
@@ -89,6 +95,7 @@ read -rp "config.json \$schema URL (사내 GitHub raw URL): " SCHEMA_URL
 
 echo ""
 echo "--- 입력 확인 ---"
+echo "설치 경로: ${AIDM_ROOT}"
 echo "\$schema: ${SCHEMA_URL}"
 echo "프로바이더: ${PROVIDER_ID} (http://${PROVIDER_HOST}:${PROVIDER_PORT}/v1)"
 echo "모델: ${MODEL_ID} (${MODEL_NAME})"
@@ -216,13 +223,14 @@ echo "[4/4] 환경 설정 스크립트 생성..."
 
 OPENCODE_SH="${AIDM_ROOT}/opencode.sh"
 
-sudo tee "${OPENCODE_SH}" > /dev/null << 'PROFILEEOF'
+sudo tee "${OPENCODE_SH}" > /dev/null << PROFILEEOF
 #!/bin/bash
-# /opt/aidm/opencode.sh -- OpenCode 온프레미스 환경 설정
+# ${AIDM_ROOT}/opencode.sh -- OpenCode 온프레미스 환경 설정
 # aidm 그룹 사용자만 source 가능
 
-export PATH="/opt/aidm/node/bin:/opt/aidm/bin:$PATH"
-export OPENCODE_CONFIG_DIR="/opt/aidm/config"
+export OPENCODE_AIDM_ROOT="${AIDM_ROOT}"
+export PATH="${AIDM_ROOT}/bin:\$PATH"
+export OPENCODE_CONFIG_DIR="${AIDM_ROOT}/config"
 
 # 아웃바운드 차단 (6종)
 export OPENCODE_DISABLE_MODELS_FETCH=true
